@@ -10,26 +10,6 @@
 #include <lwip/api.h>
 
 
-void write_data(struct netconn *conn){
-    // При записи просто отправляем указатель на буфер и количество байт. Последний аргумент - флаг для записи. Но я пока про них ничего не понимаю
-    netconn_write(conn, "hi there!", 9, NETCONN_NOCOPY);
-}
-
-void read_data(struct netconn *conn){
-    // При чтении немного сложнее
-    struct netbuf *inbuf;
-    uint8_t *buf;
-    uint16_t buflen;
-
-    // Ждем что нам напишут. Функция блокирующая. В inbuf лежит информация кто и что написал
-    netconn_recv(conn, &inbuf);
-    // Память мы сами не выделяем, все делает lwip. Просто подсовываем известное имя, чтобы оно начало указывать на начало данных. Заодно узнаем количество байт
-    netbuf_data(inbuf, (void **)&buf, &buflen);
-    // Выводим по юарту полученные данные. Я пользовался tcp терминалом и отправлял буквы, так что принтфом пользоваться не надо было
-    sdWrite(&SD3, buf, buflen);
-    // Очишаем память. Если этого не делать она очень быстро закончится
-    netbuf_delete(inbuf);
-}
 
 
 THD_WORKING_AREA(wa_tcp_server, 1024);
@@ -42,6 +22,9 @@ THD_FUNCTION(tcp_server, p) {
 // newconn - внешнее соединение с тем кто постучится
   struct netconn *conn, *newconn;
   err_t err;
+  struct netbuf* buf;
+  void* data;
+  u16_t len;
 
 // Запускаем соединение в режиме TCP
   conn = netconn_new(NETCONN_TCP);
@@ -55,23 +38,30 @@ THD_FUNCTION(tcp_server, p) {
 // И начинаем его слушать
   netconn_listen(conn);
 
-  while (true) {
+  while (true)
+  {
     palToggleLine(LINE_LED3);
-
     // Ждем что кто-то подключится. Функция блокирующая
     err = netconn_accept(conn, &newconn);
-    // Если что-то не так - ничего не делаем
-    if (err != ERR_OK)
-      continue;
-    // Индикация что кто-то подключился
-    // Напишем что-нибудь
-    write_data(newconn);
-    // Прочитаем что-нибудь
-    read_data(newconn);
-    // По окончанию работы закрываем соединение и удаляем подключение
-    netconn_close(newconn);
-    netconn_delete(newconn);
-    // После этого готовы снова подключится
+    // Если кто-то подключился начинаем общение
+    if (err == ERR_OK)
+    {
+       while ((err = netconn_recv(newconn, &buf)) == ERR_OK)
+       {
+         do
+         {
+           netbuf_data(buf, &data, &len);
+           netconn_write(newconn, data, len, NETCONN_COPY);
+
+         } while (netbuf_next(buf) >= 0);
+
+         netbuf_delete(buf);
+       }
+
+       // После отключения закрываем соединение
+       netconn_close(newconn);
+       netconn_delete(newconn);
+     }
   }
 
 }
