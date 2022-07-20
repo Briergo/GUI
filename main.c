@@ -50,10 +50,14 @@ THD_FUNCTION(tcp_server, p) {
        {
          do
          {
+           //Прием данных от клиента
            netbuf_data(buf, &data, &len);
+           //Формирование ответа от нашего сервера
            netconn_write(newconn, data, len, NETCONN_COPY);
 
-         } while (netbuf_next(buf) >= 0);
+         }
+         //Пока соединение не закрыто
+         while (netbuf_next(buf) >= 0);
 
          netbuf_delete(buf);
        }
