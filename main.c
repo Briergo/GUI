@@ -1,6 +1,8 @@
 #include "ch.h"
 #include "hal.h"
 #include <serial.h>
+#include "modbusTCP.h"
+#include "modbusRegister.h"
 
 // Это связка lwip с chibios
 #include <lwipthread.h>
@@ -9,10 +11,10 @@
 #include <lwip/netif.h>
 #include <lwip/api.h>
 
+extern uint8_t out_buf[100];
 
 
-
-THD_WORKING_AREA(wa_tcp_server, 1024);
+THD_WORKING_AREA(wa_tcp_server, 4096);
 THD_FUNCTION(tcp_server, p) {
 
 // Чтобы убрать ворнинги
@@ -23,8 +25,9 @@ THD_FUNCTION(tcp_server, p) {
   struct netconn *conn, *newconn;
   err_t err;
   struct netbuf* buf;
-  void* data;
-  u16_t len;
+  uint8_t* data;
+  uint16_t len;
+  uint16_t answer_len;
 
 // Запускаем соединение в режиме TCP
   conn = netconn_new(NETCONN_TCP);
@@ -51,9 +54,11 @@ THD_FUNCTION(tcp_server, p) {
          do
          {
            //Прием данных от клиента
-           netbuf_data(buf, &data, &len);
-           //Формирование ответа от нашего сервера
-           netconn_write(newconn, data, len, NETCONN_COPY);
+           netbuf_data(buf,(void **)&data, &len);
+           //Формирование ответа протокола ModbusTCP
+           answer_len=modbustcp_go(data);
+           //Отправка ответа клиенту
+           netconn_write(newconn, out_buf, answer_len, NETCONN_NOCOPY);
 
          }
          //Пока соединение не закрыто
@@ -78,6 +83,8 @@ int main(void) {
     chSysInit();
     debug_stream_init();
     dbgprintf("start\r\n");
+    modbus_register_create();
+    palToggleLine(LINE_LED1);
 
 
 // Задаем адрес стмки
@@ -93,6 +100,9 @@ int main(void) {
     opts.gateway = gateway.addr;
     opts.netmask = netmask.addr;
     opts.macaddress = macaddr;
+    opts.link_up_cb = NULL;
+    opts.link_down_cb = NULL;
+
 
 // Запускаем сетевой драйвер. С этого момента на разьеме начнется индикация и стм будет пинговаться, если другой конец шнура в той же сети
 // Можем не передавать настройки, использовав NULL в качестве аргумента. Тогда будут использованы настройки по умолчанию из файла lwipthread.h
@@ -100,7 +110,7 @@ int main(void) {
     chThdSleepSeconds(2);
 
 // Запустим поток сервера
-    chThdCreateStatic(wa_tcp_server, 1024, NORMALPRIO, tcp_server, NULL);
+    chThdCreateStatic(wa_tcp_server, 4096, NORMALPRIO, tcp_server, NULL);
 
 // Помигаем лампочкой, чтобы понимать что не зависли
     while (true) {
